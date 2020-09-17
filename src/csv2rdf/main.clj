@@ -7,7 +7,8 @@
             [grafter-2.rdf4j.formats :as formats]
             [clojure.tools.logging :as log])
   (:import [java.net URI URISyntaxException]
-           [org.eclipse.rdf4j.rio RDFFormat]))
+           [org.eclipse.rdf4j.rio RDFFormat]
+           [java.util.concurrent Executors TimeUnit]))
 
 (def options-spec
   [["-t" "--tabular TABULAR" "Location of the tabular file"]
@@ -46,12 +47,22 @@
   (println summary)
   (System/exit 1))
 
+(defn- write-progress []
+  (binding [*out* *err*]
+    (print ".")
+    (flush)))
+
 (defn- write-output [writer {:keys [rdf-format tabular-source metadata-source mode]}]
-  (try
-    (let [dest (gio/rdf-writer writer :format rdf-format :prefixes nil)]
-      (csvw/csv->rdf->destination tabular-source metadata-source dest {:mode mode}))
-    (catch Exception ex
-      (log/error ex))))
+  (let [e (Executors/newScheduledThreadPool 1)
+        pf (.scheduleAtFixedRate e write-progress 2 2 TimeUnit/SECONDS)]
+    (try
+      (let [dest (gio/rdf-writer writer :format rdf-format :prefixes nil)]
+        (csvw/csv->rdf->destination tabular-source metadata-source dest {:mode mode}))
+      (catch Exception ex
+        (log/error ex))
+      (finally
+        (.cancel pf false)
+        (.shutdown e)))))
 
 (defn -main [& args]
   (let [{:keys [summary options] :as parse-result} (cli/parse-opts args options-spec)
